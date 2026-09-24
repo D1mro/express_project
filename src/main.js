@@ -1,87 +1,79 @@
 import express from 'express'
+import cors from 'cors'
+
+import usersRouter from './controllers/auth.js'
+import ordersRouter from './controllers/order.js'
+import auth from './middleware/auth.js'
 
 const app = express()
-app.use(express.json())
 
-app.get('/', (req, res) => {
-  res.send('Hello World')
+// ---------- CORS: разрешаем только адреса из списка ----------
+const allowedOrigins = ['http://localhost:5173', 'http://localhost:3000']
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // origin нет у запросов не из браузера (curl, Postman) — пропускаем
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true)
+      } else {
+        callback(new Error('Этот адрес не разрешён CORS'))
+      }
+    },
+  })
+)
+
+// ---------- Логгер: метод, путь и время каждого запроса ----------
+app.use((req, res, next) => {
+  console.log(req.method, req.url, new Date())
+  next()
 })
 
-class Entity {
-  constructor(data) {
-    Object.assign(this, data)
-    this.id = this.constructor.nextId++
+// ---------- Ограничение: не больше 5 запросов с одного IP за 10 секунд ----------
+const requests = new Map() // ip -> массив времени запросов
+
+app.use((req, res, next) => {
+  const now = Date.now()
+
+  // оставляем только запросы за последние 10 секунд
+  const times = (requests.get(req.ip) || []).filter((time) => now - time < 10000)
+  times.push(now)
+  requests.set(req.ip, times)
+
+  if (times.length > 5) {
+    return res.status(429).json({ error: 'Слишком много запросов' })
   }
+  next()
+})
 
-  static create(data) {
-    const item = new this(data)
-    this.items.push(item)
-    return item
+// Чтобы express понимал JSON в теле запроса
+app.use(express.json())
+
+// ---------- Маршруты ----------
+
+// GET /search?q=... — возвращает параметр q
+app.get('/search', (req, res) => {
+  const q = req.query.q
+  if (!q) {
+    return res.status(400).json({ error: 'Не передан параметр q' })
   }
+  res.json({ q })
+})
 
-  static getAll() {
-    return this.items
-  }
+// POST /echo — возвращает обратно то, что прислали
+app.post('/echo', (req, res) => {
+  res.json(req.body)
+})
 
-  static getById(id) {
-    return this.items.find((i) => i.id === Number(id))
-  }
+// GET /admin — middleware auth подключён только сюда
+app.get('/admin', auth, (req, res) => {
+  res.json({ message: 'Добро пожаловать в админку' })
+})
 
-  static update(id, data) {
-    const item = this.getById(id)
-    if (item) Object.assign(item, data)
-    return item
-  }
-
-  static remove(id) {
-    const index = this.items.findIndex((i) => i.id === Number(id))
-    if (index === -1) return false
-    this.items.splice(index, 1)
-    return true
-  }
-}
-
-
-class Product extends Entity {
-  static items = []
-  static nextId = 1
-}
-
-class User extends Entity {
-  static items = []
-  static nextId = 1
-}
-
-class Order extends Entity {
-  static items = []
-  static nextId = 1
-}
-
-
-function crudRoutes(path, EntityClass) {
-  app.get(path, (req, res) => res.json(EntityClass.getAll()))
-
-  app.get(`${path}/:id`, (req, res) => {
-    const item = EntityClass.getById(req.params.id)
-    item ? res.json(item) : res.status(404).json({ error: 'Not found' })
-  })
-
-  app.post(path, (req, res) => res.status(201).json(EntityClass.create(req.body)))
-
-  app.put(`${path}/:id`, (req, res) => {
-    const item = EntityClass.update(req.params.id, req.body)
-    item ? res.json(item) : res.status(404).json({ error: 'Not found' })
-  })
-
-  app.delete(`${path}/:id`, (req, res) => {
-    EntityClass.remove(req.params.id) ? res.status(204).send() : res.status(404).json({ error: 'Not found' })
-  })
-}
-
-crudRoutes('/products', Product)
-crudRoutes('/users', User)
-crudRoutes('/orders', Order)
+// Подключаем роутеры
+app.use('/users', usersRouter)
+app.use('/orders', ordersRouter)
 
 app.listen(3000, () => {
-  console.log('Server is running on http://localhost:3000')
+  console.log('Сервер запущен: http://localhost:3000')
 })
