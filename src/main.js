@@ -1,9 +1,12 @@
 import express from 'express'
 import cors from 'cors'
 
-import usersRouter from './controllers/auth.js'
+import authRouter from './controllers/auth.js'
+import usersRouter from './controllers/user.js'
+import productsRouter from './controllers/product.js'
 import ordersRouter from './controllers/order.js'
 import auth from './middleware/auth.js'
+import { sequelize } from './db.js'
 
 const app = express()
 
@@ -71,8 +74,20 @@ app.get('/admin', auth, (req, res) => {
 })
 
 // Подключаем роутеры
+app.use('/auth', authRouter)
 app.use('/users', usersRouter)
+app.use('/products', productsRouter)
 app.use('/orders', ordersRouter)
+
+// ---------- Обработчик ошибок: если где-то что-то упало (например, база) ----------
+// У него 4 параметра — так express понимает, что это обработчик ошибок
+app.use((err, req, res, next) => {
+  console.error(err)
+  res.status(500).json({ error: 'Ошибка сервера' })
+})
+
+// Сначала создаём таблицы в базе (если их ещё нет), потом запускаем сервер
+await sequelize.sync()
 
 app.listen(3000, () => {
   console.log('Сервер запущен: http://localhost:3000')
